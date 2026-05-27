@@ -1,4 +1,7 @@
-export default function RestaurantHeader({ name, bannerUrl }) {
+export default function RestaurantHeader({ name, bannerUrl, nroMesa, zonaMesa }) {
+  // Verificamos si realmente viene de una mesa física o si entró sin QR
+  const esMesaFisica = nroMesa && nroMesa !== "Llevar / Delivery";
+
   return (
     <>
       {/* Banner Superior */}
@@ -14,7 +17,19 @@ export default function RestaurantHeader({ name, bannerUrl }) {
             <span className="text-4xl">🍔</span>
             <div>
               <h1 className="text-2xl font-black tracking-tight text-stone-900">{name}</h1>
-              <p className="text-xs text-stone-500 font-medium mt-0.5">📍 Mesa 04 • Pide desde tu celular</p>
+              
+              {/* Texto Dinámico con condicional */}
+              <p className="text-xs text-stone-500 font-medium mt-0.5">
+                {esMesaFisica ? (
+                  <>
+                    📍 <span className="font-bold text-stone-800">Mesa {nroMesa}</span> 
+                    {zonaMesa && zonaMesa !== "General" && ` (${zonaMesa})`} • Pide desde tu celular
+                  </>
+                ) : (
+                  <>🛍️ Pedido para Llevar / Delivery</>
+                )}
+              </p>
+
             </div>
           </div>
         </div>
