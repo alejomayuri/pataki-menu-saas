@@ -70,7 +70,7 @@ export default function ProductModal({
   const handleTouchEnd = () => {
     setIsDragging(false);
     // Si se arrastró más de 120 píxeles hacia abajo, consideramos que quiere cerrarlo
-    if (translateY > 120) {
+    if (translateY > 60) {
       setIsRendered(false);
       // Animamos el resto del trayecto hacia abajo
       const remainingDistance = window.innerHeight - translateY;
