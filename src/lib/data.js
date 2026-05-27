@@ -128,6 +128,17 @@ export const restaurantMock = {
             { name: "Mostaza", price: 0 },
             { name: "Ají parrillero de la casa", price: 0 }
           ]
+        },
+        {
+          id: "b1-extras",
+          title: "¿Quieres meterle más peso?",
+          required: false,
+          type: "multiple",
+          options: [
+            { name: "Huevo frito de corral", price: 2.00 },
+            { name: "Extra Queso Cheddar", price: 2.50 },
+            { name: "Porción de harto Tocino", price: 4.00 }
+          ]
         }
       ]
     },
