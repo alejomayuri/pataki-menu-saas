@@ -1,18 +1,25 @@
 // src/app/page.js
 "use client";
 
-import { useState, useEffect, Suspense } from "react"; // 1. Importamos Suspense de React
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { restaurantMock } from "@/lib/data";
 import RestaurantHeader from "@/components/RestaurantHeader";
 import CategorySelector from "@/components/CategorySelector";
 import ProductModal from "@/components/ProductModal";
+import ProductCard from "@/components/ProductCard";
 import CartBar from "@/components/CartBar";
+import OrdersModal from "@/components/OrdersModal";
 
-// 2. CREAMOS UN SUBCOMPONENTE CON TODA LA LÓGICA QUE USABAS ANTES
+const { name, bannerUrl, categories, products } = restaurantMock;
+
+// OPTIMIZACIÓN 1: Agrupamos los productos por categoría una sola vez en memoria (fuera del render)
+const productsByCategory = categories.reduce((acc, category) => {
+  acc[category] = products.filter(p => p.category === category && p.isAvailable);
+  return acc;
+}, {});
+
 function MenuContenido() {
-  const { name, bannerUrl, categories, products } = restaurantMock;
-  
   const searchParams = useSearchParams();
   const nroMesa = searchParams.get("m") || "Llevar / Delivery";
   const zonaMesa = searchParams.get("z") || "General";
@@ -23,7 +30,9 @@ function MenuContenido() {
   const [selectedMultipleOptions, setSelectedMultipleOptions] = useState({});
   const [confirmedOrders, setConfirmedOrders] = useState([]);
   const [activeCategory, setActiveCategory] = useState("");
+  const [isOrdersModalOpen, setIsOrdersModalOpen] = useState(false);
 
+  // IntersectionObserver para actualizar la categoría activa en el scroll
   useEffect(() => {
     const sectionIds = categories.map(cat => cat.toLowerCase().replace(/\s+/g, "-"));
     const observerOptions = { root: null, rootMargin: "-20% 0px -60% 0px", threshold: 0 };
@@ -40,18 +49,16 @@ function MenuContenido() {
       if (element) observer.observe(element);
     });
 
-    return () => {
-      sectionIds.forEach((id) => {
-        const element = document.getElementById(id);
-        if (element) observer.unobserve(element);
-      });
-    };
-  }, [categories]);
+    return () => observer.disconnect(); // OPTIMIZACIÓN 2: Desconexión limpia y global del observer
+  }, []);
+
+  // --- ACCIONES DEL MENÚ Y DEL CARRITO ---
 
   const handleProductClick = (product) => {
     setSelectedProduct(product);
     setSelectedSingleOptions({});
     setSelectedMultipleOptions({});
+    
     if (product.customizations) {
       const initialSingle = {};
       product.customizations.forEach(cust => {
@@ -91,10 +98,9 @@ function MenuContenido() {
     const finalTotalPrice = selectedProduct.price + extraPrice;
 
     const existingItemIndex = cart.findIndex(item => {
-      const sameProduct = item.id === selectedProduct.id;
-      const sameSingle = JSON.stringify(item.selectedCustomizations.single) === JSON.stringify(selectedSingleOptions);
-      const sameMultiple = JSON.stringify(item.selectedCustomizations.multiple) === JSON.stringify(selectedMultipleOptions);
-      return sameProduct && sameSingle && sameMultiple;
+      return item.id === selectedProduct.id && 
+             JSON.stringify(item.selectedCustomizations.single) === JSON.stringify(selectedSingleOptions) && 
+             JSON.stringify(item.selectedCustomizations.multiple) === JSON.stringify(selectedMultipleOptions);
     });
 
     if (existingItemIndex > -1) {
@@ -104,8 +110,8 @@ function MenuContenido() {
         )
       );
     } else {
-      const cartItem = {
-        cartItemId: Date.now().toString(),
+      setCart(prevCart => [...prevCart, {
+        cartItemId: crypto.randomUUID(),
         id: selectedProduct.id,
         name: selectedProduct.name,
         basePrice: selectedProduct.price,
@@ -115,8 +121,7 @@ function MenuContenido() {
           multiple: { ...selectedMultipleOptions }
         },
         quantity: 1
-      };
-      setCart(prevCart => [...prevCart, cartItem]);
+      }]);
     }
 
     setSelectedProduct(null);
@@ -126,38 +131,62 @@ function MenuContenido() {
     if (cart.length === 0) return;
 
     const productosParaCocina = cart.map(item => {
-      const notasEstructuradas = {};
-      Object.entries(item.selectedCustomizations.single).forEach(([id, name]) => { if (name) notasEstructuradas[id] = name; });
-      Object.entries(item.selectedCustomizations.multiple).forEach(([id, list]) => { if (list?.length > 0) notasEstructuradas[id] = list; });
+      const notasFormateadas = [];
+      Object.entries(item.selectedCustomizations.single).forEach(([_, value]) => {
+        if (value) notasFormateadas.push(value);
+      });
+      Object.entries(item.selectedCustomizations.multiple).forEach(([_, list]) => {
+        if (list && list.length > 0) notasFormateadas.push(...list);
+      });
 
-      return { name: item.name, quantity: item.quantity, notas: notasEstructuradas };
+      return {
+        name: item.name,
+        quantity: item.quantity,
+        precioUnitario: item.totalPrice,
+        notas: notasFormateadas
+      };
     });
 
-    const ticketCocina = {
-      ticketId: Date.now().toString(),
+    const totalTicket = cart.reduce((acc, item) => acc + (item.totalPrice * item.quantity), 0);
+
+    setConfirmedOrders(prevOrders => [...prevOrders, {
+      ticketId: crypto.randomUUID(),
       mesa: nroMesa, 
       zona: zonaMesa,
       timestamp: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
       items: productosParaCocina,
-      subtotal: cart.reduce((acc, item) => acc + (item.totalPrice * item.quantity), 0)
-    };
+      totalTicket: totalTicket
+    }]);
 
-    setConfirmedOrders(prevOrders => [...prevOrders, ticketCocina]);
     setCart([]);
   };
 
-  console.log("Pedidos confirmados (enviados a cocina):", confirmedOrders);
+  const solicitarCuenta = (metodoSeleccionado) => {
+    const totalAcumulado = confirmedOrders.reduce((acc, ticket) => acc + (ticket.totalTicket || 0), 0);
+
+    const payloadCuenta = {
+      restaurantSlug: "pataki-landing-studio",
+      mesa: nroMesa,
+      zona: zonaMesa,
+      tipo: "cuenta",
+      estado: "pendiente",
+      metodoPago: metodoSeleccionado,
+      timestamp: new Date().toISOString(),
+      totalACobrar: totalAcumulado
+    };
+
+    console.log("🔥 Enviando solicitud de CUENTA a Caja:", payloadCuenta);
+  };
 
   const removeFromCart = (cartItemId) => {
-    setCart(prevCart => {
-      const itemToModify = prevCart.find(item => item.cartItemId === cartItemId);
-      if (!itemToModify) return prevCart;
-      if (itemToModify.quantity > 1) {
-        return prevCart.map(item => item.cartItemId === cartItemId ? { ...item, quantity: item.quantity - 1 } : item);
-      } 
-      return prevCart.filter(item => item.cartItemId !== cartItemId);
-    });
-    
+    setCart(prevCart => prevCart.reduce((acc, item) => {
+      if (item.cartItemId === cartItemId) {
+        if (item.quantity > 1) acc.push({ ...item, quantity: item.quantity - 1 });
+      } else {
+        acc.push(item);
+      }
+      return acc;
+    }, []));
   };
 
   return (
@@ -167,26 +196,19 @@ function MenuContenido() {
 
       <div className="px-4 space-y-8 mt-4 pb-10">
         {categories.map((category) => {
-          const categoryProducts = products.filter(p => p.category === category && p.isAvailable);
+          const categoryProducts = productsByCategory[category] || []; // Consumimos la caché pre-filtrada
+          if (categoryProducts.length === 0) return null;
+
           return (
             <section key={category} id={category.toLowerCase().replace(/\s+/g, "-")} className="scroll-mt-24">
               <h2 className="text-lg font-black text-stone-800 mb-3 border-b border-stone-200 pb-1 uppercase tracking-wider">{category}</h2>
               <div className="grid gap-3">
                 {categoryProducts.map((product) => (
-                  <div key={product.id} onClick={() => handleProductClick(product)} className="bg-white rounded-xl p-3 shadow-sm border border-stone-100 flex justify-between gap-4 active:scale-[0.98] transition-all cursor-pointer">
-                    <div className="flex-1 flex flex-col justify-between py-0.5">
-                      <div className="space-y-1">
-                        <h3 className="font-bold text-stone-900 text-base leading-snug">{product.name}</h3>
-                        <p className="text-xs text-stone-500 line-clamp-2 leading-relaxed">{product.description}</p>
-                      </div>
-                      <p className="text-sm font-extrabold text-amber-600 mt-2">S/ {product.price.toFixed(2)}</p>
-                    </div>
-                    {product.imageUrl && (
-                      <div className="h-24 w-24 rounded-xl overflow-hidden bg-stone-100 shrink-0 border border-stone-200/40">
-                        <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" loading="lazy" />
-                      </div>
-                    )}
-                  </div>
+                  <ProductCard 
+                    key={product.id} 
+                    product={product} 
+                    onClick={() => handleProductClick(product)} 
+                  />
                 ))}
               </div>
             </section>
@@ -194,13 +216,57 @@ function MenuContenido() {
         })}
       </div>
 
-      <ProductModal product={selectedProduct} onClose={() => setSelectedProduct(null)} singleOptions={selectedSingleOptions} multipleOptions={selectedMultipleOptions} onSingleSelect={handleSingleSelect} onMultipleSelect={handleMultipleSelect} onConfirm={addToCart} />
+      <ProductModal 
+        product={selectedProduct} 
+        onClose={() => setSelectedProduct(null)} 
+        singleOptions={selectedSingleOptions} 
+        multipleOptions={selectedMultipleOptions} 
+        onSingleSelect={handleSingleSelect} 
+        onMultipleSelect={handleMultipleSelect} 
+        onConfirm={addToCart} 
+      />
       <CartBar cart={cart} onClick={enviarACocina} onClearCart={() => setCart([])} onRemoveItem={removeFromCart} />
+
+      {/* Barra de Consumo Acumulado (Estilo CartBar) */}
+      {confirmedOrders.length > 0 && (
+        <div 
+          className={`fixed left-0 right-0 bg-stone-900 text-white shadow-xl transition-all duration-300 z-40 border-t border-stone-800 ${
+            cart.length > 0 ? "bottom-0" : "bottom-0" // Si hay carrito, se apila arriba elegantemente
+          }`}
+        >
+          <div className="max-w-md mx-auto flex items-center justify-between px-4 py-3.5">
+            <div className="flex items-center gap-3">
+              <div className="bg-amber-500 text-stone-950 text-xs font-black h-6 w-6 rounded-lg flex items-center justify-center shadow-sm">
+                {confirmedOrders.reduce((acc, t) => acc + t.items.reduce((sum, i) => sum + i.quantity, 0), 0)}
+              </div>
+              <div>
+                <p className="text-xs text-stone-400 font-medium leading-none">Mi consumo en mesa</p>
+                <p className="text-base font-black text-white mt-0.5">
+                  S/ {confirmedOrders.reduce((acc, t) => acc + (t.totalTicket || 0), 0).toFixed(2)}
+                </p>
+              </div>
+            </div>
+            
+            <button
+              onClick={() => setIsOrdersModalOpen(true)}
+              className="bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-stone-950 font-bold text-sm px-4 py-2 rounded-xl transition-all shadow-sm"
+            >
+              Ver Pedidos / Cuenta 📋
+            </button>
+          </div>
+        </div>
+      )}
+
+      <OrdersModal 
+        isOpen={isOrdersModalOpen} 
+        onClose={() => setIsOrdersModalOpen(false)} 
+        confirmedOrders={confirmedOrders}
+        onSolicitarCuenta={solicitarCuenta}
+      />
     </main>
   );
 }
 
-// 3. EL COMPONENTE PADRE EXPORTADO AHORA ENVUELVE TODO EN SUSPENSE
 export default function MenuLanding() {
   return (
     <Suspense fallback={
