@@ -8,29 +8,40 @@ export default function OrdersModal({
   onClose,
   confirmedOrders = [],
   onSolicitarCuenta,
+  isAccountRequested = false, // <-- Nueva prop para saber si ya se pidió la cuenta a nivel global
+  initialMethod = null        // <-- Nueva prop para recordar el método elegido si ya se pidió
 }) {
   const [isRendered, setIsRendered] = useState(false);
-  const [metodoPago, setMetodoPago] = useState(null);
-  const [cuentaEnviada, setCuentaEnviada] = useState(false);
+  const [metodoPago, setMetodoPago] = useState(initialMethod);
 
-  // Estados y referencias para controlar el arrastre con el dedo (Gesto exacto de ProductModal)
+  // Estados y referencias para controlar el arrastre con el dedo
   const [translateY, setTranslateY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
 
   const startYRef = useRef(0);
   const currentYRef = useRef(0);
 
-  // Controla la entrada animada al abrirse y resetea estados internos
+  // Sincronizar el método de pago inicial si cambia desde fuera
+  useEffect(() => {
+    if (initialMethod) {
+      setMetodoPago(initialMethod);
+    }
+  }, [initialMethod]);
+
+  // Controla únicamente la animación de entrada al abrirse
   useEffect(() => {
     if (isOpen) {
       const timer = setTimeout(() => setIsRendered(true), 10);
       document.body.style.overflow = "hidden";
-      setTranslateY(0); // Reinicia la posición
-      setMetodoPago(null); // Resetea el método anterior
-      setCuentaEnviada(false); // Resetea el flujo de envío
+      setTranslateY(0); // Reinicia la posición física de arrastre
+      
+      // Si NO se ha pedido la cuenta, permitimos resetear el selector visual para una nueva experiencia
+      if (!isAccountRequested) {
+        setMetodoPago(null);
+      }
       return () => clearTimeout(timer);
     }
-  }, [isOpen]);
+  }, [isOpen, isAccountRequested]);
 
   // Manejador para el cierre animado suave hacia abajo
   const handleAnimateClose = () => {
@@ -42,7 +53,7 @@ export default function OrdersModal({
     }, 300);
   };
 
-  // --- LÓGICA DE ARRASTRE TÁCTIL (TOUCH EVENTS CLONADOS) ---
+  // --- LÓGICA DE ARRASTRE TÁCTIL (TOUCH EVENTS) ---
   const handleTouchStart = (e) => {
     startYRef.current = e.touches[0].clientY;
     setIsDragging(true);
@@ -53,7 +64,6 @@ export default function OrdersModal({
     currentYRef.current = e.touches[0].clientY;
     const deltaY = currentYRef.current - startYRef.current;
 
-    // Solo permitimos arrastrar hacia abajo (valores positivos)
     if (deltaY > 0) {
       setTranslateY(deltaY);
     }
@@ -61,7 +71,6 @@ export default function OrdersModal({
 
   const handleTouchEnd = () => {
     setIsDragging(false);
-    // Si se arrastró más del límite, se va limpiamente hacia abajo
     if (translateY > 60) {
       setIsRendered(false);
       setTranslateY(window.innerHeight);
@@ -75,10 +84,8 @@ export default function OrdersModal({
     }
   };
 
-  // Si el modal padre dice que no está abierto en el árbol, no pintamos nada
   if (!isOpen) return null;
 
-  // Calculamos el estilo dinámico de transformación para el arrastre
   const modalStyle = isDragging
     ? { transform: `translateY(${translateY}px)`, transition: "none" }
     : { transform: `translateY(${translateY}px)` };
@@ -87,14 +94,13 @@ export default function OrdersModal({
 
   const handleMandarCuenta = () => {
     if (!metodoPago) return;
-    onSolicitarCuenta(metodoPago);
-    setCuentaEnviada(true);
+    onSolicitarCuenta(metodoPago); // Notifica al padre para que congele el estado del flujo
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center font-sans">
       
-      {/* 1. FONDO OPACO CON BLUR PREMIUM (Réplica idéntica) */}
+      {/* Fondo opaco blur */}
       <div
         className={`fixed inset-0 bg-stone-900/60 backdrop-blur-sm transition-opacity duration-300 ${
           isRendered ? "opacity-100" : "opacity-0"
@@ -105,7 +111,7 @@ export default function OrdersModal({
         }}
       />
 
-      {/* 2. CONTENEDOR DEL MODAL CON SOPORTE DE ARRASTRE */}
+      {/* Contenedor animado */}
       <div
         style={modalStyle}
         className={`relative w-full max-w-md bg-white rounded-t-2xl sm:rounded-2xl max-h-[90vh] flex flex-col shadow-xl transform transition-all duration-300 ease-in-out z-10 ${
@@ -113,7 +119,7 @@ export default function OrdersModal({
         } ${!isRendered && !isDragging ? "translate-y-full opacity-0 sm:scale-95 sm:translate-y-0" : ""}`}
       >
         
-        {/* ZONA DE ARRASTRE SUPERIOR (Pill + Cabecera integrada) */}
+        {/* Zona de arrastre */}
         <div 
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
@@ -129,14 +135,14 @@ export default function OrdersModal({
           </div>
         </div>
 
-        {/* CONTENIDO CON SOFT SCROLL INTERNO */}
+        {/* Contenido Scrollable */}
         <div className="px-4 py-5 overflow-y-auto flex-1 space-y-6 scrollbar-none scroll-smooth">
-          {cuentaEnviada ? (
+          {isAccountRequested ? (
             <div className="text-center py-10 space-y-3">
               <div className="text-4xl animate-bounce">⏳</div>
               <h3 className="font-bold text-stone-900 text-lg">Cuenta solicitada</h3>
               <p className="text-sm text-stone-500 px-4 leading-relaxed">
-                El mozo se está acercando a tu mesa con la cuenta para pagar en <strong>{metodoPago.toUpperCase()}</strong>. ¡Gracias por tu visita!
+                El mozo se está acercando a tu mesa con la cuenta y el lector/código para pagar con <strong>{metodoPago === "yape" ? "Yape / Plin" : metodoPago?.toUpperCase()}</strong>. ¡Gracias por tu visita!
               </p>
             </div>
           ) : (
@@ -227,23 +233,14 @@ export default function OrdersModal({
                       <span className="text-xs font-medium">Tarjeta</span>
                     </button>
                   </div>
-
-                  {metodoPago === "yape" && (
-                    <div className="bg-purple-50 rounded-2xl p-4 text-center border border-purple-100 space-y-2 transition-all">
-                      <p className="text-xs text-purple-900 font-medium">Escanea aquí para pagar el total:</p>
-                      <div className="w-32 h-32 bg-stone-200 mx-auto rounded-xl flex items-center justify-center text-xs text-stone-500 font-bold border-2 border-dashed border-purple-200 bg-white">
-                        [ QR RESTAURANTE ]
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
             </>
           )}
         </div>
 
-        {/* BOTÓN DE ACCIÓN FIJO ABAJO */}
-        {!cuentaEnviada && confirmedOrders.length > 0 && (
+        {/* Botón de acción fijo abajo */}
+        {!isAccountRequested && confirmedOrders.length > 0 && (
           <div className="p-4 border-t border-stone-100 bg-stone-50 rounded-b-2xl space-y-4 pb-6">
             <div className="flex justify-between items-center px-1">
               <span className="text-sm font-bold text-stone-500">Total acumulado:</span>

@@ -11,8 +11,13 @@ export default function ProductModal({
   onSingleSelect,
   onMultipleSelect,
   onConfirm,
+  isBlocked
 }) {
   const [isRendered, setIsRendered] = useState(false);
+  
+  // --- ESTADOS DE CONTROL Y VALIDACIÓN ---
+  const [errors, setErrors] = useState({}); // Guarda los IDs de las secciones con error
+  const [shakeSection, setShakeSection] = useState(null); // ID de la sección que va a temblar
   
   // Estados para controlar el arrastre con el dedo
   const [translateY, setTranslateY] = useState(0);
@@ -21,12 +26,18 @@ export default function ProductModal({
   const startYRef = useRef(0);
   const currentYRef = useRef(0);
 
+  // Limpia los errores cada vez que se cambia de producto o se cierra
+  useEffect(() => {
+    setErrors({});
+    setShakeSection(null);
+  }, [product]);
+
   // Controla la entrada animada al abrirse
   useEffect(() => {
     if (product) {
       const timer = setTimeout(() => setIsRendered(true), 10);
       document.body.style.overflow = "hidden";
-      setTranslateY(0); // Reinicia la posición por si se arrastró antes
+      setTranslateY(0); 
       return () => clearTimeout(timer);
     }
   }, [product]);
@@ -34,14 +45,45 @@ export default function ProductModal({
   // Manejador para el cierre animado suave hacia abajo
   const handleAnimateClose = () => {
     setIsRendered(false);
-    setTranslateY(0); // Asegura que use la animación por defecto de Tailwind
+    setTranslateY(0);
     setTimeout(() => {
       document.body.style.overflow = "unset";
       onClose();
     }, 300);
   };
 
+  // --- LÓGICA DE VALIDACIÓN ANTES DE CONFIRMAR ---
   const handleConfirmWithAnimation = () => {
+    if (isBlocked) return;
+
+    const newErrors = {};
+    let firstErrorId = null;
+
+    // Buscamos personalizaciones obligatorias (single) que no tengan selección
+    product.customizations?.forEach((custom) => {
+      if (custom.type === "single" && !singleOptions[custom.id]) {
+        newErrors[custom.id] = true;
+        if (!firstErrorId) firstErrorId = custom.id;
+      }
+    });
+
+    // Si hay errores, bloqueamos y hacemos feedback visual
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      setShakeSection(firstErrorId);
+      
+      // Reseteamos el efecto de temblor después de 500ms
+      setTimeout(() => setShakeSection(null), 500);
+
+      // Scroll automático hacia la sección del error
+      const errorElement = document.getElementById(`custom-section-${firstErrorId}`);
+      if (errorElement) {
+        errorElement.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      return;
+    }
+
+    // Si todo está ok, procede con el guardado normal
     setIsRendered(false);
     setTimeout(() => {
       document.body.style.overflow = "unset";
@@ -49,8 +91,21 @@ export default function ProductModal({
     }, 300);
   };
 
+  // Limpia el error de una sección específica de inmediato cuando el usuario selecciona una opción
+  const handleOptionSelect = (customizationId, optionName, isSingle) => {
+    if (isSingle) {
+      setErrors((prev) => {
+        const updated = { ...prev };
+        delete updated[customizationId];
+        return updated;
+      });
+      onSingleSelect(customizationId, optionName);
+    } else {
+      onMultipleSelect(customizationId, optionName);
+    }
+  };
+
   // --- LÓGICA DE ARRASTRE TÁCTIL (TOUCH EVENTS) ---
-  
   const handleTouchStart = (e) => {
     startYRef.current = e.touches[0].clientY;
     setIsDragging(true);
@@ -61,7 +116,6 @@ export default function ProductModal({
     currentYRef.current = e.touches[0].clientY;
     const deltaY = currentYRef.current - startYRef.current;
 
-    // Solo permitimos arrastrar hacia abajo (valores positivos)
     if (deltaY > 0) {
       setTranslateY(deltaY);
     }
@@ -69,11 +123,8 @@ export default function ProductModal({
 
   const handleTouchEnd = () => {
     setIsDragging(false);
-    // Si se arrastró más de 120 píxeles hacia abajo, consideramos que quiere cerrarlo
     if (translateY > 60) {
       setIsRendered(false);
-      // Animamos el resto del trayecto hacia abajo
-      const remainingDistance = window.innerHeight - translateY;
       setTranslateY(window.innerHeight);
       
       setTimeout(() => {
@@ -81,17 +132,20 @@ export default function ProductModal({
         onClose();
       }, 250);
     } else {
-      // Si no llegó al límite, regresa a su posición original con el muelle de CSS
       setTranslateY(0);
     }
   };
 
   if (!product) return null;
 
-  // Calculamos el estilo dinámico de transformación para el arrastre
   const modalStyle = isDragging
     ? { transform: `translateY(${translateY}px)`, transition: "none" }
     : { transform: `translateY(${translateY}px)` };
+
+  // Comprobamos si falta alguna opción obligatoria en general para alterar el botón inferior
+  const hasPendingRequired = product.customizations?.some(
+    (c) => c.type === "single" && !singleOptions[c.id]
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center font-sans">
@@ -103,7 +157,6 @@ export default function ProductModal({
         }`}
         onClick={handleAnimateClose}
         style={{
-          // El fondo se va aclarando sutilmente a medida que arrastras el modal hacia abajo
           opacity: isDragging ? Math.max(0.1, 1 - translateY / 400) : undefined
         }}
       />
@@ -115,7 +168,7 @@ export default function ProductModal({
           isRendered && !isDragging ? "translate-y-0 opacity-100" : ""
         } ${!isRendered && !isDragging ? "translate-y-full opacity-0 sm:scale-95 sm:translate-y-0" : ""}`}
       >
-        {/* ZONA DE ARRASTRE SUPERIOR (Pill + espacio circundante para fácil captura) */}
+        {/* ZONA DE ARRASTRE SUPERIOR */}
         <div 
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
@@ -141,64 +194,82 @@ export default function ProductModal({
           </div>
 
           {/* Mapeo dinámico de personalizaciones */}
-          {product.customizations?.map((custom) => (
-            <div key={custom.id} className="space-y-2">
-              <h3 className="text-sm font-black text-stone-800 uppercase tracking-wider flex justify-between">
-                <span>{custom.title}</span>
-                <span className="text-[10px] text-stone-400 font-normal lowercase">
-                  {custom.type === "single" ? "Selecciona uno" : "Opcional"}
-                </span>
-              </h3>
-              
-              <div className="grid gap-2">
-                {custom.options.map((option) => {
-                  const isSingle = custom.type === "single";
-                  const isChecked = isSingle
-                    ? singleOptions[custom.id] === option.name
-                    : multipleOptions[custom.id]?.includes(option.name);
+          {product.customizations?.map((custom) => {
+            const isSingle = custom.type === "single";
+            const hasError = errors[custom.id];
+            const isFreezing = shakeSection === custom.id;
 
-                  return (
-                    <div
-                      key={option.name}
-                      onClick={() =>
-                        isSingle
-                          ? onSingleSelect(custom.id, option.name)
-                          : onMultipleSelect(custom.id, option.name)
-                      }
-                      className={`flex items-center justify-between p-3 rounded-xl border text-sm font-medium cursor-pointer transition-all active:scale-[0.99] select-none ${
-                        isChecked
-                          ? "border-amber-500 bg-amber-50/40 text-amber-900"
-                          : "border-stone-200 bg-white text-stone-700"
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <input
-                          type={isSingle ? "radio" : "checkbox"}
-                          name={custom.id}
-                          checked={isChecked || false}
-                          onChange={() => {}}
-                          className="accent-amber-600 h-4 w-4 pointer-events-none"
-                        />
-                        <span className="text-stone-800 font-semibold">{option.name}</span>
+            return (
+              <div 
+                key={custom.id} 
+                id={`custom-section-${custom.id}`}
+                className={`space-y-2 p-2 rounded-xl transition-all duration-300 ${
+                  hasError ? "bg-red-50/60 ring-1 ring-red-200" : ""
+                } ${isFreezing ? "animate-shake" : ""}`}
+              >
+                <h3 className="text-sm font-black text-stone-800 uppercase tracking-wider flex justify-between px-1">
+                  <span className={hasError ? "text-red-700 font-extrabold" : ""}>
+                    {custom.title} {hasError && "⚠️"}
+                  </span>
+                  <span className={`text-[10px] font-normal lowercase ${hasError ? "text-red-500 font-bold" : "text-stone-400"}`}>
+                    {isSingle ? "Obligatorio (Elige uno)" : "Opcional"}
+                  </span>
+                </h3>
+                
+                <div className="grid gap-2">
+                  {custom.options.map((option) => {
+                    const isChecked = isSingle
+                      ? singleOptions[custom.id] === option.name
+                      : multipleOptions[custom.id]?.includes(option.name);
+
+                    return (
+                      <div
+                        key={option.name}
+                        onClick={() => handleOptionSelect(custom.id, option.name, isSingle)}
+                        className={`flex items-center justify-between p-3 rounded-xl border text-sm font-medium cursor-pointer transition-all active:scale-[0.99] select-none ${
+                          isChecked
+                            ? "border-amber-500 bg-amber-50/40 text-amber-900"
+                            : hasError 
+                              ? "border-red-200 bg-white text-stone-700 hover:border-red-300"
+                              : "border-stone-200 bg-white text-stone-700"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <input
+                            type={isSingle ? "radio" : "checkbox"}
+                            name={custom.id}
+                            checked={isChecked || false}
+                            onChange={() => {}}
+                            className={`h-4 w-4 pointer-events-none ${isSingle ? "accent-amber-600" : "accent-stone-900"}`}
+                          />
+                          <span className="text-stone-800 font-semibold">{option.name}</span>
+                        </div>
+                        {option.price > 0 && (
+                          <span className="text-xs font-bold text-stone-500">+ S/ {option.price.toFixed(2)}</span>
+                        )}
                       </div>
-                      {option.price > 0 && (
-                        <span className="text-xs font-bold text-stone-500">+ S/ {option.price.toFixed(2)}</span>
-                      )}
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Botón de acción fijo abajo */}
         <div className="p-4 border-t border-stone-100 bg-stone-50 rounded-b-2xl">
           <button
             onClick={handleConfirmWithAnimation}
-            className="w-full bg-stone-900 hover:bg-stone-800 text-white font-bold py-3.5 px-4 rounded-xl text-sm transition-colors shadow-sm"
+            disabled={isBlocked}
+            className={`w-full font-bold py-3.5 rounded-xl transition-all shadow-lg text-sm tracking-wide uppercase ${
+              isBlocked 
+                ? "bg-stone-300 text-stone-500 cursor-not-allowed opacity-60 shadow-none" 
+                : hasPendingRequired
+                  ? "bg-stone-400 text-white hover:bg-stone-500" // Avisa sutilmente que falta rellenar
+                  : "bg-amber-500 hover:bg-amber-600 text-stone-950 shadow-amber-500/10" // Activo completo y llamativo
+            }`}
           >
-            Agregar al pedido
+            {hasPendingRequired && !isBlocked ? "Completa las opciones" : "Agregar al pedido"}
           </button>
         </div>
 

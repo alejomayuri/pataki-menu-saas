@@ -21,16 +21,56 @@ const productsByCategory = categories.reduce((acc, category) => {
 
 function MenuContenido() {
   const searchParams = useSearchParams();
-  const nroMesa = searchParams.get("m") || "Llevar / Delivery";
-  const zonaMesa = searchParams.get("z") || "General";
+  
+  // CONTROL DE FLUJO MVP: Detección estricta si el comensal está en Mesa o es para llevar
+  const mesaParam = searchParams.get("m");
+  const zonaParam = searchParams.get("z");
+  const esModoMesa = Boolean(mesaParam && zonaParam);
 
+  const nroMesa = mesaParam || "Para Llevar";
+  const zonaMesa = zonaParam || "Barra";
+
+  // --- 1. ESTADOS PRINCIPALES ---
   const [cart, setCart] = useState([]);
+  const [confirmedOrders, setConfirmedOrders] = useState([]);
+  const [cuentaSolicitada, setCuentaSolicitada] = useState(false);
+  const [metodoPagoElegido, setMetodoPagoElegido] = useState(null);
+  const [pedidoParaLlevarEnviado, setPedidoParaLlevarEnviado] = useState(false); // 🌟 Estado premium de confirmación de barra
+
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [selectedSingleOptions, setSelectedSingleOptions] = useState({});
   const [selectedMultipleOptions, setSelectedMultipleOptions] = useState({});
-  const [confirmedOrders, setConfirmedOrders] = useState([]);
   const [activeCategory, setActiveCategory] = useState("");
   const [isOrdersModalOpen, setIsOrdersModalOpen] = useState(false);
+
+  // --- EFECTO DE CARGA INICIAL (Solo en el Cliente) ---
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedCart = localStorage.getItem("mi-menu-cart");
+      if (savedCart) setCart(JSON.parse(savedCart));
+
+      const savedOrders = localStorage.getItem("mi-menu-orders");
+      if (savedOrders) setConfirmedOrders(JSON.parse(savedOrders));
+
+      const savedCuenta = localStorage.getItem("mi-menu-cuenta-solicitada");
+      if (savedCuenta) setCuentaSolicitada(savedCuenta === "true");
+
+      const savedMetodo = localStorage.getItem("mi-menu-metodo-pago");
+      if (savedMetodo) setMetodoPagoElegido(savedMetodo);
+
+      const savedPedidoBarra = localStorage.getItem("mi-menu-pedido-barra-enviado");
+      if (savedPedidoBarra) setPedidoParaLlevarEnviado(savedPedidoBarra === "true");
+    }
+  }, []);
+
+  // --- 2. EFECTOS DE SINCRONIZACIÓN AUTOMÁTICA CON LOCALSTORAGE ---
+  useEffect(() => {
+    localStorage.setItem("mi-menu-cart", JSON.stringify(cart));
+  }, [cart]);
+
+  useEffect(() => {
+    localStorage.setItem("mi-menu-orders", JSON.stringify(confirmedOrders));
+  }, [confirmedOrders]);
 
   // IntersectionObserver para actualizar la categoría activa en el scroll
   useEffect(() => {
@@ -49,7 +89,7 @@ function MenuContenido() {
       if (element) observer.observe(element);
     });
 
-    return () => observer.disconnect(); // OPTIMIZACIÓN 2: Desconexión limpia y global del observer
+    return () => observer.disconnect();
   }, []);
 
   // --- ACCIONES DEL MENÚ Y DEL CARRITO ---
@@ -86,11 +126,38 @@ function MenuContenido() {
 
   const addToCart = () => {
     let extraPrice = 0;
-    selectedProduct.customizations?.forEach(custom => {
-      if (custom.type === 'multiple') {
-        const selectedList = selectedMultipleOptions[custom.id] || [];
-        custom.options.forEach(opt => {
-          if (selectedList.includes(opt.name)) extraPrice += opt.price;
+    const displayCustomizations = [];
+
+    // 1. PROCESAMOS SELECCIONES ÚNICAS (SINGLE) Y CALCULAMOS SU PRECIO EXTRA
+    Object.entries(selectedSingleOptions).forEach(([customId, optionName]) => {
+      const customConfig = selectedProduct.customizations?.find(c => c.id === customId);
+      const optionConfig = customConfig?.options?.find(o => o.name === optionName);
+      
+      if (optionConfig) {
+        extraPrice += optionConfig.price;
+        displayCustomizations.push({
+          label: customConfig.title,
+          value: optionName,
+          price: optionConfig.price
+        });
+      }
+    });
+
+    // 2. PROCESAMOS SELECCIONES MÚLTIPLES (MULTIPLE) Y CALCULAMOS SU PRECIO EXTRA
+    Object.entries(selectedMultipleOptions).forEach(([customId, selectedList]) => {
+      const customConfig = selectedProduct.customizations?.find(c => c.id === customId);
+      
+      if (customConfig && selectedList.length > 0) {
+        selectedList.forEach(optionName => {
+          const optionConfig = customConfig.options?.find(o => o.name === optionName);
+          if (optionConfig) {
+            extraPrice += optionConfig.price;
+            displayCustomizations.push({
+              label: customConfig.title,
+              value: optionName,
+              price: optionConfig.price
+            });
+          }
         });
       }
     });
@@ -120,6 +187,7 @@ function MenuContenido() {
           single: { ...selectedSingleOptions },
           multiple: { ...selectedMultipleOptions }
         },
+        displayCustomizations, 
         quantity: 1
       }]);
     }
@@ -127,16 +195,13 @@ function MenuContenido() {
     setSelectedProduct(null);
   };
 
-  const enviarACocina = () => {
+  const enviarPedido = () => {
     if (cart.length === 0) return;
 
     const productosParaCocina = cart.map(item => {
       const notasFormateadas = [];
-      Object.entries(item.selectedCustomizations.single).forEach(([_, value]) => {
-        if (value) notasFormateadas.push(value);
-      });
-      Object.entries(item.selectedCustomizations.multiple).forEach(([_, list]) => {
-        if (list && list.length > 0) notasFormateadas.push(...list);
+      item.displayCustomizations.forEach(cust => {
+        notasFormateadas.push(`${cust.label}: ${cust.value}`);
       });
 
       return {
@@ -149,16 +214,29 @@ function MenuContenido() {
 
     const totalTicket = cart.reduce((acc, item) => acc + (item.totalPrice * item.quantity), 0);
 
-    setConfirmedOrders(prevOrders => [...prevOrders, {
-      ticketId: crypto.randomUUID(),
-      mesa: nroMesa, 
-      zona: zonaMesa,
-      timestamp: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
-      items: productosParaCocina,
-      totalTicket: totalTicket
-    }]);
-
-    setCart([]);
+    if (esModoMesa) {
+      // FLUJO A: Pedido acumulado regular en mesa
+      setConfirmedOrders(prevOrders => [...prevOrders, {
+        ticketId: crypto.randomUUID(),
+        mesa: nroMesa, 
+        zona: zonaMesa,
+        timestamp: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
+        items: productosParaCocina,
+        totalTicket: totalTicket
+      }]);
+      setCart([]);
+    } else {
+      // FLUJO B: Pedido inmediato para llevar (Take Away)
+      console.log("🚀 Enviando comanda de Retiro en Barra:", {
+        mesa: "Para Llevar",
+        items: productosParaCocina,
+        total: totalTicket
+      });
+      
+      setCart([]);
+      setPedidoParaLlevarEnviado(true);
+      localStorage.setItem("mi-menu-pedido-barra-enviado", "true"); // Persistencia de feedback
+    }
   };
 
   const solicitarCuenta = (metodoSeleccionado) => {
@@ -175,6 +253,14 @@ function MenuContenido() {
       totalACobrar: totalAcumulado
     };
 
+    setCuentaSolicitada(true);
+    setMetodoPagoElegido(metodoSeleccionado);
+
+    setSelectedProduct(null); 
+    setIsOrdersModalOpen(false);
+    
+    localStorage.setItem("mi-menu-cuenta-solicitada", "true");
+    localStorage.setItem("mi-menu-metodo-pago", metodoSeleccionado);
     console.log("🔥 Enviando solicitud de CUENTA a Caja:", payloadCuenta);
   };
 
@@ -189,14 +275,27 @@ function MenuContenido() {
     }, []));
   };
 
+  const handleResetDebug = () => {
+    localStorage.clear();
+    window.location.reload();
+  };
+
   return (
-    <main className="min-h-screen bg-stone-100 pb-12 font-sans text-stone-900">
+    <main className="min-h-screen bg-stone-100 pb-12 font-sans text-stone-900 relative">
+      
+      <button 
+        onClick={handleResetDebug}
+        className="fixed top-4 right-4 z-50 bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded shadow-md opacity-50 hover:opacity-100 transition-opacity"
+      >
+        Reset Local
+      </button>
+
       <RestaurantHeader name={name} bannerUrl={bannerUrl} nroMesa={nroMesa} zonaMesa={zonaMesa} />
       <CategorySelector categories={categories} activeCategory={activeCategory} />
 
       <div className="px-4 space-y-8 mt-4 pb-10">
         {categories.map((category) => {
-          const categoryProducts = productsByCategory[category] || []; // Consumimos la caché pre-filtrada
+          const categoryProducts = productsByCategory[category] || [];
           if (categoryProducts.length === 0) return null;
 
           return (
@@ -207,7 +306,8 @@ function MenuContenido() {
                   <ProductCard 
                     key={product.id} 
                     product={product} 
-                    onClick={() => handleProductClick(product)} 
+                    onClick={(cuentaSolicitada || pedidoParaLlevarEnviado) ? undefined : () => handleProductClick(product)} 
+                    disabledStyle={(cuentaSolicitada || pedidoParaLlevarEnviado) ? "opacity-40 pointer-events-none cursor-not-allowed select-none" : ""}
                   />
                 ))}
               </div>
@@ -223,17 +323,23 @@ function MenuContenido() {
         multipleOptions={selectedMultipleOptions} 
         onSingleSelect={handleSingleSelect} 
         onMultipleSelect={handleMultipleSelect} 
-        onConfirm={addToCart} 
+        onConfirm={() => !(cuentaSolicitada || pedidoParaLlevarEnviado) && addToCart()} 
+        isBlocked={cuentaSolicitada || pedidoParaLlevarEnviado}
       />
-      <CartBar cart={cart} onClick={enviarACocina} onClearCart={() => setCart([])} onRemoveItem={removeFromCart} />
+      
+      <CartBar 
+        hasActiveOrders={esModoMesa && confirmedOrders.length > 0} 
+        cart={cart} 
+        onClick={() => !(cuentaSolicitada || pedidoParaLlevarEnviado) && enviarPedido()}
+        onClearCart={() => setCart([])} 
+        onRemoveItem={removeFromCart} 
+        isBlocked={cuentaSolicitada || pedidoParaLlevarEnviado}
+        esModoMesa={esModoMesa}
+      />
 
-      {/* Barra de Consumo Acumulado (Estilo CartBar) */}
-      {confirmedOrders.length > 0 && (
-        <div 
-          className={`fixed left-0 right-0 bg-stone-900 text-white shadow-xl transition-all duration-300 z-40 border-t border-stone-800 ${
-            cart.length > 0 ? "bottom-0" : "bottom-0" // Si hay carrito, se apila arriba elegantemente
-          }`}
-        >
+      {/* BARRA DE CONSUMO ACUMULADO: Exclusiva para comensales en mesa física */}
+      {esModoMesa && confirmedOrders.length > 0 && (
+        <div className="fixed left-0 right-0 bg-stone-900 text-white shadow-xl transition-all duration-300 z-40 border-t border-stone-800 bottom-0">
           <div className="max-w-md mx-auto flex items-center justify-between px-4 py-3.5">
             <div className="flex items-center gap-3">
               <div className="bg-amber-500 text-stone-950 text-xs font-black h-6 w-6 rounded-lg flex items-center justify-center shadow-sm">
@@ -249,9 +355,19 @@ function MenuContenido() {
             
             <button
               onClick={() => setIsOrdersModalOpen(true)}
-              className="bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-stone-950 font-bold text-sm px-4 py-2 rounded-xl transition-all shadow-sm"
+              className={`font-bold text-sm px-4 py-2 rounded-xl transition-all shadow-sm ${
+                cuentaSolicitada 
+                  ? "bg-purple-600 hover:bg-purple-700 text-white shadow-purple-500/20 shadow-lg" 
+                  : "bg-amber-500 hover:bg-amber-600 text-stone-950"
+              }`}
             >
-              Ver Pedidos / Cuenta 📋
+              {cuentaSolicitada ? (
+                <span className="flex items-center gap-1.5">
+                  Cuenta solicitada <span className="animate-bounce inline-block">⏳</span>
+                </span>
+              ) : (
+                "Ver Pedidos 📋"
+              )}
             </button>
           </div>
         </div>
@@ -262,7 +378,30 @@ function MenuContenido() {
         onClose={() => setIsOrdersModalOpen(false)} 
         confirmedOrders={confirmedOrders}
         onSolicitarCuenta={solicitarCuenta}
+        isAccountRequested={cuentaSolicitada}
+        initialMethod={metodoPagoElegido}
       />
+
+      {/* OVERLAY DE CUENTA SOLICITADA (MESA) */}
+      {esModoMesa && cuentaSolicitada && (
+        <div className="fixed top-0 inset-x-0 bg-stone-900/95 backdrop-blur-sm text-stone-100 text-center py-3 px-4 text-xs font-medium z-50 shadow-md border-b border-stone-800 transition-all flex items-center justify-center gap-2">
+          <p className="tracking-wide">
+            Muchas gracias por tu visita. Estamos preparando tu cuenta para pago con{" "}
+            <span className="font-bold text-amber-400 capitalize">{metodoPagoElegido}</span>. 
+            En breve nos acercaremos a tu mesa.
+          </p>
+        </div>
+      )}
+
+      {/* 🌟 NUEVO BANNER DE CONFIRMACIÓN (PARA LLEVAR / BARRA) */}
+      {!esModoMesa && pedidoParaLlevarEnviado && (
+        <div className="fixed top-0 inset-x-0 bg-stone-900/95 backdrop-blur-sm text-stone-100 text-center py-3.5 px-4 text-xs font-medium z-50 shadow-md border-b border-stone-800 transition-all flex items-center justify-center gap-2 animate-slide-up">
+          <p className="tracking-wide">
+            ¡Tu pedido ha sido enviado a la barra!
+            <span className="text-amber-400 font-bold ml-1">Acércate en unos minutos para retirarlo.</span>
+          </p>
+        </div>
+      )}
     </main>
   );
 }

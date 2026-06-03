@@ -1,5 +1,5 @@
 // src/components/ProductCard.jsx
-export default function ProductCard({ product, onClick }) {
+export default function ProductCard({ product, onClick, disabledStyle = "" }) {
   return (
     <article 
       onClick={onClick} 
@@ -11,7 +11,7 @@ export default function ProductCard({ product, onClick }) {
           onClick();
         }
       }}
-      className="bg-white rounded-xl p-3 shadow-sm border border-stone-100 flex justify-between gap-4 active:scale-[0.98] transition-all cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+      className={`bg-white rounded-xl p-3 shadow-sm border border-stone-100 flex justify-between gap-4 active:scale-[0.98] transition-all cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ${disabledStyle}`}
     >
       {/* Información del Producto */}
       <div className="flex-1 flex flex-col justify-between py-0.5">

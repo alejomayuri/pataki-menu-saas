@@ -3,18 +3,24 @@
 
 import { useState, useEffect, useRef } from "react";
 
-export default function CartBar({ cart, onClearCart, onRemoveItem, onClick }) {
+export default function CartBar({ 
+  cart, 
+  onClearCart, 
+  onRemoveItem, 
+  onClick, 
+  hasActiveOrders = false, 
+  isBlocked = false,
+  esModoMesa = true // 🌟 Recibimos el flag de control de flujo MVP
+}) {
   const [isOpen, setIsOpen] = useState(false);
   const [isRendered, setIsRendered] = useState(false);
 
-  // Estados y referencias para controlar el arrastre con el dedo
   const [translateY, setTranslateY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
 
   const startYRef = useRef(0);
   const currentYRef = useRef(0);
 
-  // Todos los Hooks van al inicio de la función
   useEffect(() => {
     if (isOpen) {
       const timer = setTimeout(() => setIsRendered(true), 10);
@@ -24,7 +30,6 @@ export default function CartBar({ cart, onClearCart, onRemoveItem, onClick }) {
     }
   }, [isOpen]);
 
-  // Retorno condicional después de los Hooks
   if (cart.length === 0 && !isOpen) {
     return null;
   }
@@ -50,6 +55,7 @@ export default function CartBar({ cart, onClearCart, onRemoveItem, onClick }) {
   };
 
   const handleConfirmWithAnimation = () => {
+    if (isBlocked) return;
     setIsRendered(false);
     setTimeout(() => {
       document.body.style.overflow = "unset";
@@ -58,7 +64,7 @@ export default function CartBar({ cart, onClearCart, onRemoveItem, onClick }) {
     }, 300);
   };
 
-  // --- LÓGICA DE ARRASTRE TÁCTIL (TOUCH EVENTS) ---
+  // --- LÓGICA DE ARRASTRE TÁCTIL ---
   const handleTouchStart = (e) => {
     startYRef.current = e.touches[0].clientY;
     setIsDragging(true);
@@ -68,10 +74,7 @@ export default function CartBar({ cart, onClearCart, onRemoveItem, onClick }) {
     if (!isDragging) return;
     currentYRef.current = e.touches[0].clientY;
     const deltaY = currentYRef.current - startYRef.current;
-
-    if (deltaY > 0) {
-      setTranslateY(deltaY);
-    }
+    if (deltaY > 0) setTranslateY(deltaY);
   };
 
   const handleTouchEnd = () => {
@@ -79,7 +82,6 @@ export default function CartBar({ cart, onClearCart, onRemoveItem, onClick }) {
     if (translateY > 60) {
       setIsRendered(false);
       setTranslateY(window.innerHeight);
-
       setTimeout(() => {
         document.body.style.overflow = "unset";
         setIsOpen(false);
@@ -98,129 +100,159 @@ export default function CartBar({ cart, onClearCart, onRemoveItem, onClick }) {
 
   return (
     <>
-      {/* BARRA FLOTANTE INFERIOR 
-        Cambiado de 'bottom-4' a 'bottom-20' para que flote limpiamente por encima 
-        de la barra de estados de cocina sin empujarla ni levantarla.
-      */}
+      {/* BARRA FLOTANTE INFERIOR */}
       {cart.length > 0 && (
-        <div className="fixed bottom-20 inset-x-4 z-40 max-w-md mx-auto animate-slide-up">
+        <div className={`fixed inset-x-4 z-40 max-w-md mx-auto animate-slide-up transition-all duration-300 ease-in-out ${hasActiveOrders ? "bottom-20" : "bottom-4"}`}>
           <button
             type="button"
-            onClick={() => setIsOpen(true)}
-            className="w-full bg-amber-500 hover:bg-amber-600 text-stone-950 font-black px-5 py-4 rounded-xl shadow-xl flex justify-between items-center transition-all active:scale-[0.99]"
+            onClick={() => !isBlocked && setIsOpen(true)}
+            disabled={isBlocked}
+            className={`w-full text-stone-950 font-black px-5 py-4 rounded-xl shadow-xl flex justify-between items-center transition-all ${
+              isBlocked 
+                ? "bg-stone-300 text-stone-500 cursor-not-allowed opacity-60 shadow-none" 
+                : "bg-amber-500 hover:bg-amber-600 active:scale-[0.99]"
+            }`}
           >
             <div className="flex items-center gap-2.5">
-              <span className="bg-stone-950 text-amber-500 text-xs rounded-lg px-2.5 py-1 font-black">
+              <span className={`text-xs rounded-lg px-2.5 py-1 font-black ${isBlocked ? "bg-stone-400 text-stone-200" : "bg-stone-950 text-amber-500"}`}>
                 {totalItems}
               </span>
-              <span className="text-sm tracking-wide uppercase">Ver mi pedido</span>
+              <span className="text-sm tracking-wide uppercase">
+                {isBlocked ? "Pedido bloqueado por cuenta" : "Ver mi pedido"}
+              </span>
             </div>
-            <span className="text-base font-extrabold">
+            <span className="text-base font-extrabold text-stone-950">
               S/ {totalPrice.toFixed(2)}
             </span>
           </button>
         </div>
       )}
 
-      {/* DESGLOSE DEL PEDIDO (Bottom Sheet) */}
+      {/* DESGLOSE DEL PEDIDO */}
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-end justify-center font-sans">
-          
-          {/* Fondo opaco blur */}
           <div
-            className={`fixed inset-0 bg-stone-900/60 backdrop-blur-sm transition-opacity duration-300 ${
-              isRendered ? "opacity-100" : "opacity-0"
-            }`}
+            className={`fixed inset-0 bg-stone-900/60 backdrop-blur-sm transition-opacity duration-300 ${isRendered ? "opacity-100" : "opacity-0"}`}
             onClick={handleAnimateClose}
-            style={{
-              opacity: isDragging ? Math.max(0.1, 1 - translateY / 400) : undefined
-            }}
+            style={{ opacity: isDragging ? Math.max(0.1, 1 - translateY / 400) : undefined }}
           />
 
-          {/* Contenedor Animado */}
           <div
             style={modalStyle}
             className={`relative w-full max-w-md bg-white rounded-t-2xl max-h-[85vh] flex flex-col shadow-xl transform transition-all duration-300 ease-in-out z-10 ${
               isRendered && !isDragging ? "translate-y-0 opacity-100" : ""
             } ${!isRendered && !isDragging ? "translate-y-full opacity-0" : ""}`}
           >
-            
             {/* Zona de arrastre */}
-            <div 
-              onTouchStart={handleTouchStart}
-              onTouchMove={handleTouchMove}
-              onTouchEnd={handleTouchEnd}
-              className="w-full cursor-grab active:cursor-grabbing shrink-0 select-none bg-stone-50/50 border-b border-stone-100 pb-3"
-            >
+            <div onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} className="w-full cursor-grab active:cursor-grabbing shrink-0 select-none bg-stone-50/50 border-b border-stone-100 pb-3">
               <div className="w-full py-3">
                 <div className="w-12 h-1 bg-stone-300 rounded-full mx-auto" />
               </div>
-
               <div className="px-4 flex justify-between items-center">
-                <h2 className="text-lg font-black text-stone-900">Resumen de Mesa</h2>
-                <button 
-                  type="button"
-                  onClick={handleClearAllWithAnimation}
-                  className="text-xs font-bold text-red-500 hover:text-red-600 bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors active:scale-95"
-                >
-                  Limpiar todo
-                </button>
+                {/* 🌟 Ajuste de texto dinámico según flujo MVP */}
+                <h2 className="text-lg font-black text-stone-900">
+                  {esModoMesa ? "Resumen de Mesa" : "Resumen del Pedido"}
+                </h2>
+                {!isBlocked && (
+                  <button type="button" onClick={handleClearAllWithAnimation} className="text-xs font-bold text-red-500 hover:text-red-600 bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors active:scale-95">
+                    Limpiar todo
+                  </button>
+                )}
               </div>
             </div>
 
             {/* Contenido Scrollable */}
             <div className="px-4 py-4 overflow-y-auto flex-1 space-y-4 divide-y divide-stone-100 scrollbar-none scroll-smooth">
-              {cart.map((item, index) => (
-                <div key={item.cartItemId} className={`flex justify-between items-center gap-3 ${index > 0 ? 'pt-4' : ''}`}>
-                  <div className="space-y-1 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-black text-stone-800">{item.quantity}x</span>
-                      <h4 className="font-bold text-stone-900 text-sm leading-tight">{item.name}</h4>
-                    </div>
-                    
-                    <div className="text-[11px] text-stone-500 space-y-0.5 pl-7 leading-relaxed">
-                      {item.selectedCustomizations?.single && Object.values(item.selectedCustomizations.single).map((val) => (
-                        <p key={val} className="capitalize">• {val}</p>
-                      ))}
-                      {item.selectedCustomizations?.multiple && Object.values(item.selectedCustomizations.multiple).flat().map((val) => (
-                        <p key={val} className="capitalize">• {val}</p>
-                      ))}
-                    </div>
-                  </div>
+              {cart.map((item, index) => {
+                const groupedCustomizations = item.displayCustomizations?.reduce((acc, current) => {
+                  if (!acc[current.label]) acc[current.label] = [];
+                  acc[current.label].push(current);
+                  return acc;
+                }, {}) || {};
 
-                  <div className="flex items-center gap-3 shrink-0">
-                    <span className="text-xs font-extrabold text-stone-700 whitespace-nowrap">
-                      S/ {(item.totalPrice * item.quantity).toFixed(2)}
-                    </span>
-                    
-                    <button
-                      type="button"
-                      onClick={() => onRemoveItem(item.cartItemId)}
-                      className="p-1.5 rounded-lg bg-stone-100 text-stone-400 hover:bg-red-50 hover:text-red-500 transition-colors active:scale-95"
-                      title="Eliminar producto"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-3.5 h-3.5">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
+                const hasCustomizations = Object.keys(groupedCustomizations).length > 0;
+
+                return (
+                  <div key={item.cartItemId} className={`flex justify-between items-start gap-3 ${index > 0 ? 'pt-4' : ''}`}>
+                    <div className="space-y-1 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-black text-stone-800">{item.quantity}x</span>
+                        <h4 className="font-bold text-stone-900 text-sm leading-tight">{item.name}</h4>
+                      </div>
+                      
+                      {/* DETALLE MEJORADO Y AGRUPADO POR CATEGORÍA */}
+                      {hasCustomizations && (
+                        <div className="text-[11px] space-y-2 pl-7 leading-relaxed bg-stone-50/70 p-2.5 rounded-lg mt-1 border border-stone-100/40">
+                          {Object.entries(groupedCustomizations).map(([label, options]) => (
+                            <div key={label} className="space-y-0.5">
+                              <span className="font-bold text-stone-400 uppercase tracking-wide text-[9px] block">
+                                {label}:
+                              </span>
+                              <div className="pl-1 space-y-0.5">
+                                {options.map((opt, oIdx) => (
+                                  <div key={oIdx} className="text-stone-600 flex justify-between items-center gap-1">
+                                    <span className="text-stone-800 font-medium">{opt.value}</span>
+                                    {opt.price > 0 && (
+                                      <span className="font-bold text-amber-600 text-[10px] shrink-0">
+                                        (+ S/ {opt.price.toFixed(2)})
+                                      </span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-3 shrink-0 pt-0.5">
+                      <span className="text-xs font-extrabold text-stone-700 whitespace-nowrap">
+                        S/ {(item.totalPrice * item.quantity).toFixed(2)}
+                      </span>
+                      
+                      {!isBlocked && (
+                        <button
+                          type="button"
+                          onClick={() => onRemoveItem(item.cartItemId)}
+                          className="p-1.5 rounded-lg bg-stone-100 text-stone-400 hover:bg-red-50 hover:text-red-500 transition-colors active:scale-95"
+                          title="Eliminar producto"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-3.5 h-3.5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Footer Fijo */}
             <div className="border-t border-stone-200 p-4 bg-stone-50 rounded-b-2xl space-y-4 pb-6 shrink-0">
               <div className="flex justify-between items-center text-stone-900 px-1">
-                <span className="text-sm font-bold text-stone-600">Total a pagar:</span>
+                <span className="text-sm font-bold text-stone-600">Total a enviar:</span>
                 <span className="text-xl font-black text-amber-600">S/ {totalPrice.toFixed(2)}</span>
               </div>
 
               <button
                 type="button"
                 onClick={handleConfirmWithAnimation}
-                className="w-full bg-stone-900 hover:bg-stone-800 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg active:scale-[0.99] text-sm tracking-wide uppercase"
+                disabled={isBlocked}
+                className={`w-full font-bold py-3.5 rounded-xl transition-all shadow-lg text-sm tracking-wide uppercase ${
+                  isBlocked
+                    ? "bg-stone-300 text-stone-400 cursor-not-allowed shadow-none"
+                    : "bg-stone-900 hover:bg-stone-800 text-white active:scale-[0.99]"
+                }`}
               >
-                Enviar Pedido a Cocina
+                {/* 🌟 Ajuste semántico del CTA de confirmación según flujo MVP */}
+                {isBlocked 
+                  ? "Cuenta en proceso" 
+                  : esModoMesa 
+                    ? "Enviar Pedido a Cocina" 
+                    : "Confirmar y Pedir en Barra ⚡"
+                }
               </button>
             </div>
 
