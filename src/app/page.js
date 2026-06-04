@@ -35,7 +35,8 @@ function MenuContenido() {
   const [confirmedOrders, setConfirmedOrders] = useState([]);
   const [cuentaSolicitada, setCuentaSolicitada] = useState(false);
   const [metodoPagoElegido, setMetodoPagoElegido] = useState(null);
-  const [pedidoParaLlevarEnviado, setPedidoParaLlevarEnviado] = useState(false); // 🌟 Estado premium de confirmación de barra
+  const [pedidoParaLlevarEnviado, setPedidoParaLlevarEnviado] = useState(false); // 🌟 Estado de confirmación de barra
+  const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
 
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [selectedSingleOptions, setSelectedSingleOptions] = useState({});
@@ -225,6 +226,7 @@ function MenuContenido() {
         totalTicket: totalTicket
       }]);
       setCart([]);
+      setShowSuccessOverlay(true);
     } else {
       // FLUJO B: Pedido inmediato para llevar (Take Away)
       console.log("🚀 Enviando comanda de Retiro en Barra:", {
@@ -264,10 +266,17 @@ function MenuContenido() {
     console.log("🔥 Enviando solicitud de CUENTA a Caja:", payloadCuenta);
   };
 
-  const removeFromCart = (cartItemId) => {
+  const updateCartItemQuantity = (cartItemId, action) => {
     setCart(prevCart => prevCart.reduce((acc, item) => {
       if (item.cartItemId === cartItemId) {
-        if (item.quantity > 1) acc.push({ ...item, quantity: item.quantity - 1 });
+        if (action === "increment") {
+          acc.push({ ...item, quantity: item.quantity + 1 });
+        } else if (action === "decrement") {
+          if (item.quantity > 1) {
+            acc.push({ ...item, quantity: item.quantity - 1 });
+          }
+          // Si es 1 y dan click a decrement, simplemente no se pushea (se elimina del carrito)
+        }
       } else {
         acc.push(item);
       }
@@ -285,7 +294,7 @@ function MenuContenido() {
       
       <button 
         onClick={handleResetDebug}
-        className="fixed top-4 right-4 z-50 bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded shadow-md opacity-50 hover:opacity-100 transition-opacity"
+        className="fixed top-4 right-4 z-90 bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded shadow-md opacity-50 hover:opacity-100 transition-opacity"
       >
         Reset Local
       </button>
@@ -332,7 +341,7 @@ function MenuContenido() {
         cart={cart} 
         onClick={() => !(cuentaSolicitada || pedidoParaLlevarEnviado) && enviarPedido()}
         onClearCart={() => setCart([])} 
-        onRemoveItem={removeFromCart} 
+        onUpdateQuantity={updateCartItemQuantity}
         isBlocked={cuentaSolicitada || pedidoParaLlevarEnviado}
         esModoMesa={esModoMesa}
       />
@@ -400,6 +409,46 @@ function MenuContenido() {
             ¡Tu pedido ha sido enviado a la barra!
             <span className="text-amber-400 font-bold ml-1">Acércate en unos minutos para retirarlo.</span>
           </p>
+        </div>
+      )}
+
+      {showSuccessOverlay && (
+        <div className="fixed inset-0 bg-stone-950 z-50 flex flex-col items-center justify-center p-6 text-center font-sans animate-fade-in">
+          {/* Círculo con Check animado */}
+          <div className="w-24 h-24 bg-amber-500 rounded-full flex items-center justify-center mb-6 shadow-lg shadow-amber-500/20 animate-scale-in">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor" className="w-12 h-12 text-stone-950">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+            </svg>
+          </div>
+
+          {/* Textos Informativos */}
+          <h2 className="text-2xl font-black text-white tracking-tight mb-2">
+            {esModoMesa ? "¡Pedido enviado a cocina!" : "¡Pedido recibido en barra!"}
+          </h2>
+          
+          <p className="text-sm text-stone-400 max-w-xs leading-relaxed mb-8">
+            {esModoMesa 
+              ? `Tu orden ya se está preparando para la Mesa ${nroMesa} (${zonaMesa}). ¡No tardará en llegar!`
+              : "Estamos listando todo. Acércate a la barra en unos minutos con tu nombre para retirarlo."
+            }
+          </p>
+
+          {/* Tarjeta con miniresumen rápido */}
+          <div className="bg-stone-900 border border-stone-800 rounded-2xl p-4 w-full max-w-xs mb-8">
+            <p className="text-[10px] text-stone-500 font-bold uppercase tracking-wider">Ubicación de orden</p>
+            <p className="text-base font-black text-amber-400 mt-0.5">
+              {esModoMesa ? `Mesa ${nroMesa} — ${zonaMesa}` : "Para Llevar / Retiro"}
+            </p>
+          </div>
+
+          {/* Botón de retorno */}
+          <button
+            type="button"
+            onClick={() => setShowSuccessOverlay(false)}
+            className="bg-white hover:bg-stone-100 text-stone-950 font-bold px-8 py-3.5 rounded-xl text-sm shadow-md transition-all active:scale-95 w-full max-w-xs uppercase tracking-wider"
+          >
+            Volver al Menú
+          </button>
         </div>
       )}
     </main>
