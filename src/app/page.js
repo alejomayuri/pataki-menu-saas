@@ -10,8 +10,12 @@ import ProductModal from "@/components/ProductModal";
 import ProductCard from "@/components/ProductCard";
 import CartBar from "@/components/CartBar";
 import OrdersModal from "@/components/OrdersModal";
+import {useMenu} from "@/hooks/useMenu";
 
 const { name, bannerUrl, categories, products } = restaurantMock;
+
+// Prueba de hook personalizado para manejo de menú con Firebase
+const restaurantId = "41zAC3WS2eciPGzv3j7F";
 
 // OPTIMIZACIÓN 1: Agrupamos los productos por categoría una sola vez en memoria (fuera del render)
 const productsByCategory = categories.reduce((acc, category) => {
@@ -19,7 +23,7 @@ const productsByCategory = categories.reduce((acc, category) => {
   return acc;
 }, {});
 
-function MenuContenido() {
+function MenuContenido({ dbCategories, dbProducts }) {
   const searchParams = useSearchParams();
   
   // CONTROL DE FLUJO MVP: Detección estricta si el comensal está en Mesa o es para llevar
@@ -456,13 +460,23 @@ function MenuContenido() {
 }
 
 export default function MenuLanding() {
+  const { categories: dbCategories, products: dbProducts, loading } = useMenu(restaurantId);
+  console.log("🔥 Categorías desde Firestore:", dbCategories);
+  console.log("🔥 Productos desde Firestore:", dbProducts);
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-stone-100 flex items-center justify-center">
+        <p className="text-sm text-stone-500 font-medium animate-pulse">Conectando con la cocina en la nube...</p>
+      </div>
+    );
+  }
   return (
     <Suspense fallback={
       <div className="min-h-screen bg-stone-100 flex items-center justify-center">
         <p className="text-sm text-stone-500 font-medium animate-pulse">Cargando el menú...</p>
       </div>
     }>
-      <MenuContenido />
+      <MenuContenido dbCategories={dbCategories} dbProducts={dbProducts} />
     </Suspense>
   );
 }
